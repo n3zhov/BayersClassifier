@@ -53,7 +53,7 @@ void BayersClassifier::learnClassifier(const vector<CategoryItem> &trainingSampl
     N2 = accumulate(sClassCount.begin(), sClassCount.end(), 0.,
                     [](double value, const pair<string, double> &valArg){
                         return value + valArg.second;
-                    });;
+                    });
 
     P1 = log(subSum1/(subSum1+subSum2));
     P2 = log(subSum2/(subSum1+subSum2));
