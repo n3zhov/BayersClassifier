@@ -46,13 +46,19 @@ void BayersClassifier::learnClassifier(const vector<CategoryItem> &trainingSampl
         }
     }
 
-    N1 = static_cast<double>(fClassWords.size());
-    N2 = static_cast<double>(sClassWords.size());
+    N1 = accumulate(fClassCount.begin(), fClassCount.end(), 0.,
+                    [](double value, const pair<string, double> &valArg){
+        return value + valArg.second;
+    });
+    N2 = accumulate(sClassCount.begin(), sClassCount.end(), 0.,
+                    [](double value, const pair<string, double> &valArg){
+                        return value + valArg.second;
+                    });;
 
     P1 = log(subSum1/(subSum1+subSum2));
     P2 = log(subSum2/(subSum1+subSum2));
 
-    M = N1 + N2;
+    M = static_cast<double>(fClassWords.size()) + static_cast<double>(sClassWords.size());
 }
 
 bool BayersClassifier::classify(const string &str) {

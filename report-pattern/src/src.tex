@@ -1,0 +1,250 @@
+\section{Описание}
+Требуется написать реализацию наивного Байесовского классификатора. 
+Как сказано в \cite{Habr}, для работы классификатора: \enquote{Необходимо рассчитать оценку для каждого класса (спам/не спам) и выбрать ту, которая получилась максимальной.}.
+\\Для этого используем следующую формулу:
+$$\arg \max{[P(Q_k)\prod\limits_{i = 1}^{n}{P(x_i|Q_k)}]}$$
+$P(Q_k) = \frac{\textrm{число документов класса } Q_k}{\textrm{общее количество документов}}$
+\\
+$P(x_i|Q_k) = \frac {\alpha + N_{ik}}{\alpha M + N_k}$ - вероятность принадлежности слова $x_i$ к классу $Q_k$ (со сглаживанием*)
+\\
+$N_k$ - количество слов, входящих в документ класса $Q_k$ (сначала я думал, что $N_k$ кол-во уникальных слов, но проверив формулу в статье на сайте \cite{Bazhenov}
+понял, что ошибся и внёс соответсвующие коррективы в программу)
+\\
+$M$ - количество уникальных слов из обучающей выборки
+\\
+$N_{ik}$ - количество вхождений слова $x_i$ в документ класса $Q_k$
+\\
+$\alpha$ - параметр для сглаживания
+\\
+*Во время выполнения классификации может встретиться слово, которого в обучающей выборке не было. Чтобы оценка не было нулевой в любом случае, мы применяем сглаживание Лапласса, говоря
+проще, прибавляем ко всем вхождениям коэффициент $\alpha$, который в нашей программе равен единице. Тогда даже те слова, которые в обучающей выборке не были, не будут давать нулевую вероятность.
+\\
+Т.к. вероятности при большом объёме данных будут очень маленькими, их перемножение друг на друга может привести к арифмитическому переполнению снизу. Чтобы этого избежать, преобразуем формулу по свойству логарифма**
+и разобьём операции перемножения на операции сложения логарифмов
+$$\log{ab} = \log{a} + \log{b}$$
+**Логарифм – монотонно возрастающая функция. Как видно из первой формулы – мы ищем максимум. Логарифм от функции достигнет максимума в той же точке (по оси абсцисс), что и сама функция. Это упрощает вычисление, ибо 
+меняется только численное значение.
+Подставляем и получаем:
+$$\arg \max{[\log{P(Q_k)}\sum\limits_{i = 1}^{n}{\log{P(x_i|Q_k)}}]}$$
+
+\pagebreak
+
+\section{Исходный код}
+В программе байесовский классификатор сделан в виде отдельного класса, вынесенного в заголовочный файл.
+Внутри класса имеются методы для обучения на наборе входных данных и функция классификации переданной строки.
+Для упрощения представления обучающих данных была создана отдельная структура - CategoryItem, она содержит в себе лейбл 
+класса и текст данного элемента выборки. Также были созданы несколько утилитарных функций, например, SplitIntoWords. Она принимает на вход строку,
+разбивает её на слова, после чего каждое слово переводит в нижний регистр и удаляет из него все не буквы.
+
+
+\pagebreak
+\begin{lstlisting}[language=C++]
+//
+// BayersClassifier.h
+//
+
+//
+// Created by nezhov on 27.04.22.
+//
+
+#pragma once
+#include <map>
+#include <vector>
+#include <sstream>
+#include <algorithm>
+#include <numeric>
+#include <cctype>
+#include <set>
+#include <iterator>
+#include <cmath>
+#include <string>
+using namespace std;
+
+void strTolower(string& arg);
+
+vector<string> SplitIntoWords(const string& line);
+
+struct CategoryItem{
+    bool category;
+    string text;
+};
+
+class BayersClassifier {
+public:
+    void learnClassifier(const vector<CategoryItem>& trainingSample);
+    bool classify(const string& str);
+private:
+    double M = 0.;
+
+    double P1 = 0.;
+    double P2 = 0.;
+
+    double N1 = 0.;
+    double N2 = 0.;
+
+    set<string> fClassWords; 
+    set<string> sClassWords; 
+
+    map<string, double> fClassCount; 
+    map<string, double> sClassCount; 
+
+    void CountWords(const string& line, set <string>& curUnique, map<string, double>& curCount);
+
+    double calculateP(const string &arg, double Nk, const map<string, double> &ClassCount, double Pq);
+};
+
+
+
+
+\end{lstlisting}
+
+\begin{lstlisting}[language=C++]
+//
+// BayersClassifier.cpp
+//
+
+//
+// Created by nezhov on 27.04.22.
+//
+
+#include "BayersClassifier.h"
+
+void strTolower(string& arg){
+    transform(cbegin(arg), cend(arg), begin(arg),
+                   [](unsigned char c)-> unsigned char{ return tolower(c); });
+    arg.erase(remove_if(arg.begin(),
+                        arg.end(),
+                        [](unsigned char c){return !('a' <= c && c <= 'z');}),
+              arg.end());
+}
+
+vector<string> SplitIntoWords(const string& line) {
+    istringstream words_input(line);
+    vector<string> res {istream_iterator<string>(words_input), istream_iterator<string>()};
+    for(string& str: res){
+        strTolower(str);
+    }
+    return res;
+}
+
+
+void BayersClassifier::learnClassifier(const vector<CategoryItem> &trainingSample) {
+    fClassWords.clear();
+    sClassWords.clear();
+
+    fClassCount.clear();
+    sClassCount.clear();
+
+
+
+    double subSum1 = 0.; 
+    double subSum2 = 0.; 
+    for(const auto & [category, line]: trainingSample){
+        if(category){
+            CountWords(line, fClassWords, fClassCount);
+            ++subSum2;
+        }
+        else{
+            CountWords(line, sClassWords, sClassCount);
+            ++subSum1;
+        }
+    }
+
+    N1 = accumulate(fClassCount.begin(), fClassCount.end(), 0.,
+                    [](double value, const pair<string, double> &valArg){
+        return value + valArg.second;
+    });
+    N2 = accumulate(sClassCount.begin(), sClassCount.end(), 0.,
+                    [](double value, const pair<string, double> &valArg){
+                        return value + valArg.second;
+                    });;
+
+    P1 = log(subSum1/(subSum1+subSum2));
+    P2 = log(subSum2/(subSum1+subSum2));
+
+    M = static_cast<double>(fClassWords.size()) + static_cast<double>(sClassWords.size());
+}
+
+bool BayersClassifier::classify(const string &str) {
+    return calculateP(str, N1, fClassCount, P1) > calculateP(str, N2, sClassCount, P2);
+}
+
+double BayersClassifier::calculateP(const string &arg, double Nk, const map<string, double> &ClassCount, double Pq) {
+    double subM = M + Nk;
+    double alpha = 1.;
+
+    double subRes = 0.;
+    for(const string& word: SplitIntoWords(arg)){
+        try{
+            double Nik = 0.;
+            Nik = ClassCount.at(word);
+            subRes += log((alpha + Nik) / subM);
+        }catch(out_of_range &e) {
+            subRes += log((alpha) / subM);
+        }
+    }
+    return Pq + subRes;
+}
+
+void BayersClassifier::CountWords(const string &line, set<string> &curUnique, map<string, double> &curCount) {
+    for(const string& word: SplitIntoWords(line)){
+        curUnique.insert(word);
+        ++curCount[word];
+    }
+}
+
+\end{lstlisting}
+
+\begin{longtable}{|p{5.5cm}|p{7.5cm}|}
+\hline
+\rowcolor{lightgray}
+\multicolumn{2}{|c|} {BayersClassifier.h}\\
+\hline
+void learnClassifier(const vector<CategoryItem>\& trainingSample)&Функция, которая обучает классификатор.\\
+\hline
+\hline
+bool classify(const string\& str)&Функция для классификации переданной строки. Возвращает false или true в 
+зависимости от того, вероятность принадлежности к какому классу у переданного текста больше\\
+\hline
+\end{longtable}
+\pagebreak
+
+\section{Консоль}
+\begin{alltt}
+\textcolor{blue}{nezhov@killswitch:~/CLionProjects/Bayes_Classifier/cmake-build-debug}$ cat test.txt
+10 5
+1
+You have 5 notifications .
+0
+-70% sale on BLACK FRIDAY
+0
+You have won 1000000$ !!!
+1
+Congratulations we won first round !
+0
+Notification that you won 1000000$
+1
+Will you go on shopping during black friday ?
+0
+You can buy a car right now !
+0
+You have -100% sale ! You can get air conditioner for free right now !
+1
+How much is 500$ in rubles ?
+1
+Hi ! We want to buy a car .
+Is 500$ a lot ?
+How much is 1000000$ in rubles ?
+You got -70% sale on air conditioner !!!
+Our new black car costs about 1000000$ ! We never had a car before . We will buy it next friday .
+Congratulations ! This is notification that you can still get from -70% to -100% sale !!!
+\textcolor{blue}{nezhov@killswitch:~/CLionProjects/Bayes_Classifier/cmake-build-debug}$ ./Bayes_Classifier < test.txt > res.txt
+\textcolor{blue}{nezhov@killswitch:~/CLionProjects/Bayes_Classifier/cmake-build-debug}$ cat res.txt
+1
+1
+0
+1
+0
+\end{alltt}
+\pagebreak
+
